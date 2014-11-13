@@ -1,0 +1,81 @@
+#!/bin/bash
+########################################
+#                                      #
+# From:    Robert Bruckmueller         #
+# Email:   admin@mediadelivery.de      #
+# Web:     mediadelivery.de            #
+# Version: 1.1.0                       #
+# Date:    13.11.14                    #
+# License: GPL v3                      #
+# http://www.gnu.org/copyleft/gpl.html #
+#                                      #
+########################################
+# Changelog
+# v1.0: erste verion
+# v1.1: Email Versand/DB User
+
+source backup-db.config
+
+######## DO NOT CHANGE HERE ########
+if [ $1 ]
+then
+   logdebug=true
+else
+   logdebug=false
+fi
+
+senemail() {
+	betreff=$1
+	body=$2
+	attach=$3
+	if [ -z $attach ]
+	then
+		if [ -z $emailuser ]
+		then
+        	mutt -e "set smtp_url=smtp://${emailsmtp}:${emailport}" -e "set ssl_starttls=$emailtls" -e "set from=$emailfrom" -s $betreff -a /tmp/$filename.asc -- $emailto <<< $body
+		else
+        	mutt -e "set smtp_url=smtp://${emailuser}@${emailsmtp}:${emailport}" -e "set ssl_starttls=$emailtls" -e "set smtp_pass=$emailpass" -e "set from=$emailfrom" -s $betreff -a /tmp/$filename.asc -- $emailto <<< $body
+		fi
+	else
+		if [ -z $emailuser ]
+		then
+			mutt -e "set smtp_url=smtp://${emailsmtp}:${emailport}" -e "set ssl_starttls=$emailtls" -e "set from=$emailfrom" -s $betreff -- $emailto <<< $body
+		else
+		    mutt -e "set smtp_url=smtp://${emailuser}@${emailsmtp}:${emailport}" -e "set ssl_starttls=$emailtls" -e "set smtp_pass=$emailpass" -e "set from=$emailfrom" -s $betreff -- $emailto <<< $body
+		fi
+	fi
+}
+
+filename="db-`date +%d%m%Y%H%M`.sql"
+if [ -z $dbpass ]
+then
+    dbdump="mysqldump -u $dbuser --all-databases --ignore-table=mysql.event"
+else
+    dbdump="mysqldump -u $dbuser --password=$dbpass --all-databases --ignore-table=mysql.event"
+fi
+
+$dbdump  > /tmp/$filename
+
+if [ -e /tmp/$filename ]
+then
+	if [ $logdebug = true ] && [ -e /tmp/$filename ]
+    then
+    	echo "SQL Dump wurde erstellt."
+    else
+       	senemail "FEHLER: DB Backup" "Der SQL Dump konnte nicht erstellt werden."
+    fi
+    gpg -a -r $gpgkey -o /tmp/$filename.asc --encrypt /tmp/$filename
+    rm /tmp/$filename
+    if [ $logdebug = true ] && [ -e /tmp/$filename.asc ]
+    then
+    	echo "SQL Dump wurde verschluesselt."
+    else
+      	senemail "FEHLER: DB Backup" "SQL Dump wurde Erstellt, konnte aber nicht verschluesselt werden."
+    fi	
+	senemail "DB Backup $filename" "Das DB Backup ${filename} wurde erstellt." "yes"
+    if [ $logdebug = true ]
+    then
+    	echo "Email wurde versendet."
+    fi
+    rm /tmp/*.sql.asc
+fi
