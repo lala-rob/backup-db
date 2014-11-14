@@ -4,19 +4,22 @@
 # From:    Robert Bruckmueller         #
 # Email:   admin@mediadelivery.de      #
 # Web:     mediadelivery.de            #
-# Version: 1.1.0                       #
-# Date:    13.11.14                    #
+# Version: 1.2.0                       #
+# Date:    14.11.14                    #
 # License: GPL v3                      #
 # http://www.gnu.org/copyleft/gpl.html #
 #                                      #
 ########################################
-# Changelog
-# v1.0: erste verion
-# v1.1: Email Versand/DB User
+
+################################
+#                              #
+# Config at backup-db.config   #
+#                              #
+################################
 
 source backup-db.config
 
-######## DO NOT CHANGE HERE ########
+hash mutt 2>/dev/null || { echo >&2 "I require mutt but it's not installed.  Aborting."; exit 1; }
 if [ $1 ]
 then
    logdebug=true
@@ -32,18 +35,49 @@ senemail() {
 	then
 		if [ -z $emailuser ]
 		then
-			mutt -e "set smtp_url=smtp://${emailsmtp}:${emailport}" -e "set ssl_starttls=$emailtls" -e "set from=$emailfrom" -s "$betreff" -- $emailto <<< "$body"
+			if mutt -e "set smtp_url=smtp://${emailsmtp}:${emailport}" -e "set ssl_starttls=$emailtls" -e "set from=$emailfrom" -s "$betreff" -- $emailto <<< "$body"
+			then
+				debugpost "Email wurde gesendet."
+			else
+				echo "Es gab ein Problem mit mutt. Bitte Prüfen Sie die Config."
+				exit 1
+			fi
 		else
-		    mutt -e "set smtp_url=smtp://${emailuser}@${emailsmtp}:${emailport}" -e "set ssl_starttls=$emailtls" -e "set smtp_pass=$emailpass" -e "set from=$emailfrom" -s "$betreff" -- $emailto <<< "$body"
+		    if [ mutt -e "set smtp_url=smtp://${emailuser}@${emailsmtp}:${emailport}" -e "set ssl_starttls=$emailtls" -e "set smtp_pass=$emailpass" -e "set from=$emailfrom" -s "$betreff" -- $emailto <<< "$body"
+			then
+				debugpost "Email wurde gesendet."
+			else
+				echo "Es gab ein Problem mit mutt. Bitte Prüfen Sie die Config."
+				exit 1
+			fi
 		fi
 	else
 		if [ -z $emailuser ]
 		then
-        	mutt -e "set smtp_url=smtp://${emailsmtp}:${emailport}" -e "set ssl_starttls=$emailtls" -e "set from=$emailfrom" -s "$betreff" -a /tmp/$filename.asc -- $emailto <<< "$body"
+        	if mutt -e "set smtp_url=smtp://${emailsmtp}:${emailport}" -e "set ssl_starttls=$emailtls" -e "set from=$emailfrom" -s "$betreff" -a /tmp/$filename.asc -- $emailto <<< "$body"
+			then
+				debugpost "Email wurde gesendet."
+			else
+				echo "Es gab ein Problem mit mutt. Bitte Prüfen Sie die Config."
+				exit 1
+			fi
 		else
-        	mutt -e "set smtp_url=smtp://${emailuser}@${emailsmtp}:${emailport}" -e "set ssl_starttls=$emailtls" -e "set smtp_pass=$emailpass" -e "set from=$emailfrom" -s "$betreff" -a /tmp/$filename.asc -- $emailto <<< "$body"
+			if mutt -e "set smtp_url=smtp://${emailuser}@${emailsmtp}:${emailport}" -e "set ssl_starttls=$emailtls" -e "set smtp_pass=$emailpass" -e "set from=$emailfrom" -s "$betreff" -a /tmp/$filename.asc -- $emailto <<< "$body"
+			then
+				debugpost "Email wurde gesendet."
+			else
+				echo "Es gab ein Problem mit mutt. Bitte Prüfen Sie die Config."
+				exit 1
+			fi
 		fi
 	fi
+}
+debugpost(){
+	text=$1
+	if [ $logdebug = true ]
+    then
+    	echo $text
+    fi
 }
 
 filename="db-`date +%d%m%Y%H%M`.sql"
@@ -54,37 +88,24 @@ else
     dbdump="mysqldump -u $dbuser --password=$dbpass --all-databases --ignore-table=mysql.event"
 fi
 
-$dbdump  > /tmp/$filename
 
-if [ -e /tmp/$filename ]
+if $dbdump  > /tmp/$filename
 then
-	if [ $logdebug = true ] && [ -e /tmp/$filename ]
-    then
-    	echo "SQL Dump wurde erstellt."
-    fi
-    gpg -a -r $gpgkey -o /tmp/$filename.asc --encrypt /tmp/$filename
-    rm /tmp/$filename
-    if [ $logdebug = true ] && [ -e /tmp/$filename.asc ]
-    then
-    	echo "SQL Dump wurde verschluesselt."
-    fi
-    if [ ! -e /tmp/$filename.asc ]
-    then
-      	senemail "FEHLER: DB Backup" "SQL Dump wurde Erstellt, konnte aber nicht verschluesselt werden."
-      	exit 0
-    fi	
-	senemail "DB Backup $filename" "Das DB Backup $filename wurde erstellt." "yes"
-    if [ $logdebug = true ]
-    then
-    	echo "Email wurde versendet."
-    fi
-    rm /tmp/*.sql.asc
+	debugpost "SQL Dump wurde erstellt."
 else
-	if [ $logdebug = true ]
-    then
-    	echo "SQL Dump konnte nicht erstellt werden."
-    else
-       	senemail "FEHLER: DB Backup" "Der SQL Dump konnte nicht erstellt werden."
-       	exit 0
-    fi
+	senemail "FEHLER: DB Backup" "Der SQL Dump konnte nicht erstellt werden."
+	exit 1
 fi
+
+if gpg -a -r $gpgkey -o /tmp/$filename.asc --encrypt /tmp/$filename
+then
+	rm /tmp/$filename
+	debugpost "SQL Dump wurde verschluesselt."
+else
+	rm /tmp/$filename
+	senemail "FEHLER: DB Backup" "SQL Dump wurde Erstellt, konnte aber nicht verschluesselt werden."
+    exit 1
+fi
+senemail "DB Backup $filename" "Das DB Backup $filename wurde erstellt." "yes"
+rm /tmp/*.sql.asc
+exit 0
